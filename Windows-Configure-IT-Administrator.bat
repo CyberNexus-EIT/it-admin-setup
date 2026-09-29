@@ -12,6 +12,14 @@ title Windows Configure IT Administrator - CyberNexus PH
 ::
 :: This program must be run while logged in as ITAdmin.
 ::
+:: Behavior:
+::   - Verifies ITAdmin exists.
+::   - Verifies ITAdmin is a Local Administrator.
+::   - Loads the Daily User saved by the first program.
+::   - Removes the Daily User from the local Administrators group.
+::   - Configures UAC for Standard Users.
+::   - Verifies the resulting configuration.
+::
 :: Author: Mark C. Pangilinan / CyberNexus PH
 :: License: MIT
 ::
@@ -22,6 +30,12 @@ title Windows Configure IT Administrator - CyberNexus PH
 
 cls
 
+echo ============================================================
+echo       WINDOWS CONFIGURE IT ADMINISTRATOR
+echo                CYBERNEXUS PH
+echo ============================================================
+echo.
+
 :: ------------------------------------------------------------
 :: 1. CHECK ADMINISTRATOR PRIVILEGES
 :: ------------------------------------------------------------
@@ -29,11 +43,6 @@ cls
 net session >nul 2>&1
 
 if not "%errorlevel%"=="0" (
-    echo ============================================================
-    echo       WINDOWS CONFIGURE IT ADMINISTRATOR
-    echo                CYBERNEXUS PH
-    echo ============================================================
-    echo.
     echo [ERROR] Administrator privileges are required.
     echo.
     echo Right-click this file and select:
@@ -47,12 +56,6 @@ if not "%errorlevel%"=="0" (
 :: ------------------------------------------------------------
 :: 2. CHECK CURRENT WINDOWS USER
 :: ------------------------------------------------------------
-
-echo ============================================================
-echo       WINDOWS CONFIGURE IT ADMINISTRATOR
-echo                CYBERNEXUS PH
-echo ============================================================
-echo.
 
 echo [1] CHECK CURRENT WINDOWS USER
 echo ------------------------------------------------------------
@@ -101,10 +104,14 @@ echo.
 :: 4. VERIFY ITADMIN ADMINISTRATOR MEMBERSHIP
 :: ------------------------------------------------------------
 
-net localgroup Administrators ITAdmin >nul 2>&1
+echo Checking local Administrators group...
+echo.
+
+powershell -NoProfile -Command ^
+ "$group = (Get-LocalGroup -SID 'S-1-5-32-544').Name; $member = Get-LocalGroupMember -Group $group -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\\ITAdmin$' }; if ($member) { exit 0 } else { exit 1 }"
 
 if not "%errorlevel%"=="0" (
-    echo [ERROR] ITAdmin is not a member of Administrators.
+    echo [ERROR] ITAdmin is not a member of the local Administrators group.
     echo.
     pause
     exit /b 1
@@ -184,7 +191,7 @@ echo [OK] Daily User account exists.
 echo.
 
 :: ------------------------------------------------------------
-:: 8. SHOW DAILY USER
+:: 8. DISPLAY DAILY USER
 :: ------------------------------------------------------------
 
 echo [5] DAILY USER ACCOUNT
@@ -196,10 +203,34 @@ net user "%DailyUser%"
 echo.
 
 :: ------------------------------------------------------------
-:: 9. REMOVE DAILY USER FROM ADMINISTRATORS
+:: 9. CHECK WHETHER DAILY USER IS ALREADY STANDARD
 :: ------------------------------------------------------------
 
-echo [6] CONFIGURE DAILY USER AS STANDARD USER
+echo [6] CHECK DAILY USER ADMINISTRATOR STATUS
+echo ------------------------------------------------------------
+echo.
+
+powershell -NoProfile -Command ^
+ "$group = (Get-LocalGroup -SID 'S-1-5-32-544').Name; $member = Get-LocalGroupMember -Group $group -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\\%DailyUser%$' }; if ($member) { exit 0 } else { exit 1 }"
+
+if "%errorlevel%"=="0" (
+    echo [INFO] %DailyUser% is currently a member of Administrators.
+    echo.
+    goto REMOVE_DAILY_USER_ADMIN
+)
+
+echo [OK] %DailyUser% is already not a member of Administrators.
+echo [OK] %DailyUser% is configured as a Standard User.
+echo.
+goto CONFIGURE_UAC
+
+:: ------------------------------------------------------------
+:: 10. REMOVE DAILY USER FROM ADMINISTRATORS
+:: ------------------------------------------------------------
+
+:REMOVE_DAILY_USER_ADMIN
+
+echo [7] CONFIGURE DAILY USER AS STANDARD USER
 echo ------------------------------------------------------------
 echo.
 
@@ -207,12 +238,11 @@ echo Removing:
 echo.
 echo     %DailyUser%
 echo.
-echo from:
-echo.
-echo     Administrators
+echo from the local Administrators group.
 echo.
 
-net localgroup Administrators "%DailyUser%" /delete
+powershell -NoProfile -Command ^
+ "$group = (Get-LocalGroup -SID 'S-1-5-32-544').Name; Remove-LocalGroupMember -Group $group -Member '%DailyUser%' -ErrorAction Stop"
 
 if not "%errorlevel%"=="0" (
     echo.
@@ -230,10 +260,12 @@ echo [OK] %DailyUser% is now a Standard User.
 echo.
 
 :: ------------------------------------------------------------
-:: 10. CONFIGURE UAC
+:: 11. CONFIGURE UAC
 :: ------------------------------------------------------------
 
-echo [7] CONFIGURE UAC
+:CONFIGURE_UAC
+
+echo [8] CONFIGURE UAC
 echo ------------------------------------------------------------
 echo.
 
@@ -254,22 +286,26 @@ if not "%errorlevel%"=="0" (
 )
 
 :: ------------------------------------------------------------
-:: 11. VERIFY ITADMIN
+:: 12. VERIFY ITADMIN
 :: ------------------------------------------------------------
 
-echo [8] VERIFY IT ADMINISTRATOR
+echo [9] VERIFY IT ADMINISTRATOR
 echo ------------------------------------------------------------
 echo.
 
-net user ITAdmin
+echo ITAdmin membership:
+echo.
+
+powershell -NoProfile -Command ^
+ "$group = (Get-LocalGroup -SID 'S-1-5-32-544').Name; Get-LocalGroupMember -Group $group | Where-Object { $_.Name -match '\\ITAdmin$' }"
 
 echo.
 
 :: ------------------------------------------------------------
-:: 12. VERIFY DAILY USER
+:: 13. VERIFY DAILY USER
 :: ------------------------------------------------------------
 
-echo [9] VERIFY DAILY USER
+echo [10] VERIFY DAILY USER
 echo ------------------------------------------------------------
 echo.
 
@@ -278,22 +314,23 @@ net user "%DailyUser%"
 echo.
 
 :: ------------------------------------------------------------
-:: 13. VERIFY ADMINISTRATORS GROUP
+:: 14. VERIFY ADMINISTRATORS GROUP
 :: ------------------------------------------------------------
 
-echo [10] VERIFY ADMINISTRATORS GROUP
+echo [11] VERIFY ADMINISTRATORS GROUP
 echo ------------------------------------------------------------
 echo.
 
-net localgroup Administrators
+powershell -NoProfile -Command ^
+ "$group = (Get-LocalGroup -SID 'S-1-5-32-544').Name; Get-LocalGroupMember -Group $group"
 
 echo.
 
 :: ------------------------------------------------------------
-:: 14. VERIFY UAC
+:: 15. VERIFY UAC
 :: ------------------------------------------------------------
 
-echo [11] VERIFY UAC CONFIGURATION
+echo [12] VERIFY UAC CONFIGURATION
 echo ------------------------------------------------------------
 echo.
 
@@ -303,7 +340,7 @@ reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" ^
 echo.
 
 :: ------------------------------------------------------------
-:: 15. FINAL STATUS
+:: 16. FINAL STATUS
 :: ------------------------------------------------------------
 
 echo ============================================================
