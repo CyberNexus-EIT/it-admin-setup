@@ -13,7 +13,7 @@ title IT Admin Setup - CyberNexus PH
 ::     ITAdmin
 ::
 :: Daily-use Account:
-::     Automatically detected from the current Windows session.
+::     Automatically detected using %USERNAME%.
 ::
 :: Author: Mark C. Pangilinan / CyberNexus PH
 :: License: MIT
@@ -41,9 +41,18 @@ if not "%errorlevel%"=="0" (
     echo.
     echo     Run as administrator
     echo.
+    echo The window will remain open.
+    echo.
     pause
     exit /b 1
 )
+
+
+:: ============================================================
+:: START SETUP
+:: ============================================================
+
+:START_SETUP
 
 cls
 
@@ -67,6 +76,10 @@ hostname
 
 echo.
 echo Current Windows Account:
+echo     %USERNAME%
+
+echo.
+echo Full Windows Identity:
 whoami
 
 echo.
@@ -77,20 +90,21 @@ echo.
 
 
 :: ------------------------------------------------------------
-:: 3. DETECT CURRENT DAILY-USE ACCOUNT
+:: 3. AUTOMATICALLY DETECT CURRENT DAILY-USE ACCOUNT
 :: ------------------------------------------------------------
 
 echo [2] DETECT DAILY-USE WINDOWS ACCOUNT
 echo ------------------------------------------------------------
 echo.
 
-for /f "tokens=2 delims=\" %%A in ('whoami') do set "DailyUser=%%A"
+set "DailyUser=%USERNAME%"
 
 if not defined DailyUser (
     echo [ERROR] Could not detect the current Windows username.
     echo.
-    pause
-    exit /b 1
+    echo The setup cannot continue.
+    echo.
+    goto FINAL_ERROR
 )
 
 echo Current Windows user detected:
@@ -129,8 +143,7 @@ if "%errorlevel%"=="0" (
         echo.
         echo [ERROR] Failed to create ITAdmin.
         echo.
-        pause
-        exit /b 1
+        goto FINAL_ERROR
     )
 
     echo.
@@ -173,8 +186,7 @@ if /I "%DailyUser%"=="ITAdmin" (
     echo ITAdmin must remain a Local Administrator.
     echo The account will NOT be changed to Standard User.
     echo.
-    pause
-    exit /b 1
+    goto FINAL_ERROR
 )
 
 
@@ -186,7 +198,7 @@ echo [5] VERIFY DAILY-USE ACCOUNT
 echo ------------------------------------------------------------
 echo.
 
-echo Account to be configured as Standard User:
+echo Account automatically selected as Standard User:
 echo.
 echo     %DailyUser%
 echo.
@@ -196,8 +208,7 @@ net user "%DailyUser%" >nul 2>&1
 if not "%errorlevel%"=="0" (
     echo [ERROR] The detected account does not exist.
     echo.
-    pause
-    exit /b 1
+    goto FINAL_ERROR
 )
 
 net user "%DailyUser%"
@@ -233,8 +244,8 @@ choice /C YN /N /M "Continue? [Y/N]: "
 if errorlevel 2 (
     echo.
     echo [CANCELLED] No account changes were made.
-    pause
-    exit /b 0
+    echo.
+    goto FINAL_MENU
 )
 
 echo.
@@ -401,14 +412,12 @@ echo.
 echo IT Administrator:
 echo.
 echo     ITAdmin
-echo.
 echo     Role: Local Administrator
 echo.
 
 echo Daily-use Account:
 echo.
 echo     %DailyUser%
-echo.
 echo     Role: Standard User
 echo.
 
@@ -437,26 +446,64 @@ echo     PowerShell Remoting / WinRM
 echo.
 
 echo ============================================================
-echo IMPORTANT
+echo.
+echo The setup has finished.
+echo.
+echo This window will remain open until you choose an option.
+echo.
+echo [C] Close
+echo [R] Run setup again
+echo.
+
+goto FINAL_MENU
+
+
+:: ============================================================
+:: FINAL ERROR
+:: ============================================================
+
+:FINAL_ERROR
+
+echo ============================================================
+echo                    SETUP STOPPED
 echo ============================================================
 echo.
-echo This utility must only be used on computers that you
-echo own or are explicitly authorized to administer.
+echo The setup could not complete successfully.
 echo.
-echo A sign-out or restart may be required before all
-echo account and UAC changes are fully reflected.
+echo Review the message above for the reason.
 echo.
-echo ============================================================
+echo The window will remain open.
+echo.
+echo [C] Close
+echo [R] Run setup again
 echo.
 
-pause
-endlocal
+goto FINAL_MENU
 
-Important: automatic na ang username detection, pero may "Y/N" confirmation pa rin bago i-demote ang current account. Ito ang intentional safety check para hindi aksidenteng ma-lock out ang administrator account.
 
-Kung ang current user ay "Mark", halimbawa, magiging:
+:: ============================================================
+:: FINAL MENU
+:: ============================================================
 
-ITAdmin  → Local Administrator
-Mark     → Standard User
+:FINAL_MENU
 
-At kapag si "Mark" ay nag-"Run as administrator", Windows should request administrator credentials instead of simply elevating "Mark".
+choice /C CR /N /M "Select an option [C/R]: "
+
+if errorlevel 2 (
+    echo.
+    echo ============================================================
+    echo                    RUNNING AGAIN
+    echo ============================================================
+    echo.
+    goto START_SETUP
+)
+
+if errorlevel 1 (
+    echo.
+    echo Closing IT Admin Setup...
+    echo.
+    endlocal
+    exit /b 0
+)
+
+goto FINAL_MENU
