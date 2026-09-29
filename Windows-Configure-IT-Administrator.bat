@@ -13,12 +13,15 @@ title Windows Configure IT Administrator - CyberNexus PH
 :: This program must be run while logged in as ITAdmin.
 ::
 :: Behavior:
-::   - Verifies ITAdmin exists.
+::   - Verifies ITAdmin.
 ::   - Verifies ITAdmin is a Local Administrator.
-::   - Loads the Daily User saved by the first program.
-::   - Removes the Daily User from the local Administrators group.
-::   - Configures UAC for Standard Users.
+::   - Loads the Daily User saved by Program 1.
+::   - Ensures the Daily User account is enabled.
+::   - Removes the Daily User from Administrators.
+::   - Ensures the Daily User is not hidden by SpecialAccounts.
+::   - Configures Standard User UAC credential prompting.
 ::   - Verifies the resulting configuration.
+::   - Provides Close, Run Again, and Switch User options.
 ::
 :: Author: Mark C. Pangilinan / CyberNexus PH
 :: License: MIT
@@ -40,6 +43,10 @@ echo.
 :: 1. CHECK ADMINISTRATOR PRIVILEGES
 :: ------------------------------------------------------------
 
+echo [1] CHECK ADMINISTRATOR PRIVILEGES
+echo ------------------------------------------------------------
+echo.
+
 net session >nul 2>&1
 
 if not "%errorlevel%"=="0" (
@@ -53,11 +60,14 @@ if not "%errorlevel%"=="0" (
     exit /b 1
 )
 
+echo [OK] Administrator privileges confirmed.
+echo.
+
 :: ------------------------------------------------------------
-:: 2. CHECK CURRENT WINDOWS USER
+:: 2. CHECK CURRENT USER
 :: ------------------------------------------------------------
 
-echo [1] CHECK CURRENT WINDOWS USER
+echo [2] CHECK CURRENT WINDOWS USER
 echo ------------------------------------------------------------
 echo.
 
@@ -84,7 +94,7 @@ echo.
 :: 3. VERIFY ITADMIN ACCOUNT
 :: ------------------------------------------------------------
 
-echo [2] VERIFY IT ADMINISTRATOR
+echo [3] VERIFY IT ADMINISTRATOR
 echo ------------------------------------------------------------
 echo.
 
@@ -100,15 +110,21 @@ if not "%errorlevel%"=="0" (
 echo [OK] ITAdmin account exists.
 echo.
 
+net user ITAdmin /active:yes >nul
+
+echo [OK] ITAdmin account is enabled.
+echo.
+
 :: ------------------------------------------------------------
 :: 4. VERIFY ITADMIN ADMINISTRATOR MEMBERSHIP
 :: ------------------------------------------------------------
 
-echo Checking local Administrators group...
+echo [4] VERIFY IT ADMINISTRATOR MEMBERSHIP
+echo ------------------------------------------------------------
 echo.
 
 powershell -NoProfile -Command ^
- "$group = (Get-LocalGroup -SID 'S-1-5-32-544').Name; $member = Get-LocalGroupMember -Group $group -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\\ITAdmin$' }; if ($member) { exit 0 } else { exit 1 }"
+ "$group = (Get-LocalGroup -SID 'S-1-5-32-544').Name; $member = Get-LocalGroupMember -Group $group -ErrorAction SilentlyContinue | Where-Object { ($_.Name -split '\\')[-1] -eq 'ITAdmin' }; if ($member) { exit 0 } else { exit 1 }"
 
 if not "%errorlevel%"=="0" (
     echo [ERROR] ITAdmin is not a member of the local Administrators group.
@@ -121,10 +137,10 @@ echo [OK] ITAdmin is a Local Administrator.
 echo.
 
 :: ------------------------------------------------------------
-:: 5. LOAD DAILY USER CONFIGURATION
+:: 5. LOAD DAILY USER
 :: ------------------------------------------------------------
 
-echo [3] LOAD DAILY USER CONFIGURATION
+echo [5] LOAD DAILY USER CONFIGURATION
 echo ------------------------------------------------------------
 echo.
 
@@ -134,7 +150,7 @@ set "DailyUserFile=%ConfigDir%\DailyUser.txt"
 if not exist "%DailyUserFile%" (
     echo [ERROR] Daily User configuration was not found.
     echo.
-    echo Expected file:
+    echo Expected:
     echo.
     echo     %DailyUserFile%
     echo.
@@ -154,34 +170,37 @@ if not defined DailyUser (
     exit /b 1
 )
 
-echo Daily User detected:
+echo Daily User:
 echo.
 echo     %DailyUser%
 echo.
 
 :: ------------------------------------------------------------
-:: 6. PREVENT ITADMIN FROM BEING DEMOTED
+:: 6. PREVENT ITADMIN AS DAILY USER
 :: ------------------------------------------------------------
 
 if /I "%DailyUser%"=="ITAdmin" (
-    echo [ERROR] ITAdmin cannot be configured as the Daily User.
+    echo [ERROR] ITAdmin cannot be the Daily User.
     echo.
     pause
     exit /b 1
 )
 
 :: ------------------------------------------------------------
-:: 7. VERIFY DAILY USER
+:: 7. VERIFY DAILY USER ACCOUNT
 :: ------------------------------------------------------------
 
-echo [4] VERIFY DAILY USER
+echo [6] VERIFY DAILY USER ACCOUNT
 echo ------------------------------------------------------------
 echo.
 
 net user "%DailyUser%" >nul 2>&1
 
 if not "%errorlevel%"=="0" (
-    echo [ERROR] The saved Daily User does not exist.
+    echo [ERROR] The saved Daily User account does not exist.
+    echo.
+    echo Saved username:
+    echo     %DailyUser%
     echo.
     pause
     exit /b 1
@@ -191,46 +210,67 @@ echo [OK] Daily User account exists.
 echo.
 
 :: ------------------------------------------------------------
-:: 8. DISPLAY DAILY USER
+:: 8. ENSURE DAILY USER IS ENABLED
 :: ------------------------------------------------------------
 
-echo [5] DAILY USER ACCOUNT
+echo [7] ENSURE DAILY USER IS ENABLED
 echo ------------------------------------------------------------
 echo.
 
-net user "%DailyUser%"
+net user "%DailyUser%" /active:yes >nul
 
+if not "%errorlevel%"=="0" (
+    echo [ERROR] Could not enable Daily User.
+    echo.
+    pause
+    exit /b 1
+)
+
+echo [OK] Daily User account is enabled.
 echo.
 
 :: ------------------------------------------------------------
-:: 9. CHECK WHETHER DAILY USER IS ALREADY STANDARD
+:: 9. ENSURE DAILY USER IS NOT HIDDEN
 :: ------------------------------------------------------------
 
-echo [6] CHECK DAILY USER ADMINISTRATOR STATUS
+echo [8] ENSURE DAILY USER IS VISIBLE
+echo ------------------------------------------------------------
+echo.
+
+reg delete "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList" /v "%DailyUser%" /f >nul 2>&1
+
+echo [OK] Daily User sign-in visibility configuration checked.
+echo.
+
+:: ------------------------------------------------------------
+:: 10. CHECK DAILY USER ADMINISTRATOR STATUS
+:: ------------------------------------------------------------
+
+echo [9] CHECK DAILY USER ADMINISTRATOR STATUS
 echo ------------------------------------------------------------
 echo.
 
 powershell -NoProfile -Command ^
- "$group = (Get-LocalGroup -SID 'S-1-5-32-544').Name; $member = Get-LocalGroupMember -Group $group -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\\%DailyUser%$' }; if ($member) { exit 0 } else { exit 1 }"
+ "$group = (Get-LocalGroup -SID 'S-1-5-32-544').Name; $target = $env:DailyUser; $member = Get-LocalGroupMember -Group $group -ErrorAction SilentlyContinue | Where-Object { ($_.Name -split '\\')[-1] -eq $target }; if ($member) { exit 0 } else { exit 1 }"
 
 if "%errorlevel%"=="0" (
-    echo [INFO] %DailyUser% is currently a member of Administrators.
+    echo [INFO] Daily User is currently a member of Administrators.
     echo.
-    goto REMOVE_DAILY_USER_ADMIN
+    goto REMOVE_DAILY_USER
 )
 
-echo [OK] %DailyUser% is already not a member of Administrators.
-echo [OK] %DailyUser% is configured as a Standard User.
+echo [OK] Daily User is already not a member of Administrators.
+echo [OK] Daily User is already a Standard User.
 echo.
 goto CONFIGURE_UAC
 
 :: ------------------------------------------------------------
-:: 10. REMOVE DAILY USER FROM ADMINISTRATORS
+:: 11. REMOVE DAILY USER FROM ADMINISTRATORS
 :: ------------------------------------------------------------
 
-:REMOVE_DAILY_USER_ADMIN
+:REMOVE_DAILY_USER
 
-echo [7] CONFIGURE DAILY USER AS STANDARD USER
+echo [10] REMOVE DAILY USER FROM ADMINISTRATORS
 echo ------------------------------------------------------------
 echo.
 
@@ -242,34 +282,28 @@ echo from the local Administrators group.
 echo.
 
 powershell -NoProfile -Command ^
- "$group = (Get-LocalGroup -SID 'S-1-5-32-544').Name; Remove-LocalGroupMember -Group $group -Member '%DailyUser%' -ErrorAction Stop"
+ "$group = (Get-LocalGroup -SID 'S-1-5-32-544').Name; Remove-LocalGroupMember -Group $group -Member $env:DailyUser -ErrorAction Stop"
 
 if not "%errorlevel%"=="0" (
     echo.
-    echo [ERROR] Failed to remove %DailyUser% from Administrators.
-    echo.
-    echo The configuration was not completed.
+    echo [ERROR] Failed to remove Daily User from Administrators.
     echo.
     goto FINAL_ERROR
 )
 
 echo.
-echo [OK] %DailyUser% removed from Administrators.
-echo.
-echo [OK] %DailyUser% is now a Standard User.
+echo [OK] Daily User removed from Administrators.
+echo [OK] Daily User is now a Standard User.
 echo.
 
 :: ------------------------------------------------------------
-:: 11. CONFIGURE UAC
+:: 12. CONFIGURE UAC
 :: ------------------------------------------------------------
 
 :CONFIGURE_UAC
 
-echo [8] CONFIGURE UAC
+echo [11] CONFIGURE UAC
 echo ------------------------------------------------------------
-echo.
-
-echo Configuring UAC for Standard Users...
 echo.
 
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" ^
@@ -281,48 +315,43 @@ if not "%errorlevel%"=="0" (
     echo.
 ) else (
     echo.
-    echo [OK] Standard-user UAC credential prompt configured.
+    echo [OK] Standard-user UAC credential prompting configured.
     echo.
 )
 
 :: ------------------------------------------------------------
-:: 12. VERIFY ITADMIN
+:: 13. VERIFY DAILY USER STATUS
 :: ------------------------------------------------------------
 
-echo [9] VERIFY IT ADMINISTRATOR
+echo [12] VERIFY DAILY USER
 echo ------------------------------------------------------------
 echo.
 
-echo ITAdmin membership:
-echo.
-
-powershell -NoProfile -Command ^
- "$group = (Get-LocalGroup -SID 'S-1-5-32-544').Name; Get-LocalGroupMember -Group $group | Where-Object { $_.Name -match '\\ITAdmin$' }"
-
-echo.
-
-:: ------------------------------------------------------------
-:: 13. VERIFY DAILY USER
-:: ------------------------------------------------------------
-
-echo [10] VERIFY DAILY USER
-echo ------------------------------------------------------------
+echo Account information:
 echo.
 
 net user "%DailyUser%"
 
 echo.
 
+echo Checking Administrator membership...
+echo.
+
+powershell -NoProfile -Command ^
+ "$group = (Get-LocalGroup -SID 'S-1-5-32-544').Name; $target = $env:DailyUser; $member = Get-LocalGroupMember -Group $group -ErrorAction SilentlyContinue | Where-Object { ($_.Name -split '\\')[-1] -eq $target }; if ($member) { Write-Host '[WARNING] Daily User is still an Administrator.' } else { Write-Host '[OK] Daily User is not a member of Administrators.' }"
+
+echo.
+
 :: ------------------------------------------------------------
-:: 14. VERIFY ADMINISTRATORS GROUP
+:: 14. VERIFY ITADMIN
 :: ------------------------------------------------------------
 
-echo [11] VERIFY ADMINISTRATORS GROUP
+echo [13] VERIFY IT ADMINISTRATOR
 echo ------------------------------------------------------------
 echo.
 
 powershell -NoProfile -Command ^
- "$group = (Get-LocalGroup -SID 'S-1-5-32-544').Name; Get-LocalGroupMember -Group $group"
+ "$group = (Get-LocalGroup -SID 'S-1-5-32-544').Name; $member = Get-LocalGroupMember -Group $group -ErrorAction SilentlyContinue | Where-Object { ($_.Name -split '\\')[-1] -eq 'ITAdmin' }; if ($member) { Write-Host '[OK] ITAdmin is a Local Administrator.' } else { Write-Host '[ERROR] ITAdmin is not a Local Administrator.' }"
 
 echo.
 
@@ -330,7 +359,7 @@ echo.
 :: 15. VERIFY UAC
 :: ------------------------------------------------------------
 
-echo [12] VERIFY UAC CONFIGURATION
+echo [14] VERIFY UAC CONFIGURATION
 echo ------------------------------------------------------------
 echo.
 
@@ -356,6 +385,7 @@ echo Daily User:
 echo.
 echo     %DailyUser%
 echo     Role: Standard User
+echo     Account: Enabled
 echo.
 echo UAC:
 echo.
@@ -364,10 +394,9 @@ echo     for administrator-level actions.
 echo.
 echo ============================================================
 echo.
-echo Setup has finished.
-echo.
 echo [C] Close
 echo [R] Run configuration again
+echo [S] Switch User
 echo.
 
 goto FINAL_MENU
@@ -388,6 +417,7 @@ echo Review the error above.
 echo.
 echo [C] Close
 echo [R] Run configuration again
+echo [S] Switch User
 echo.
 
 :: ------------------------------------------------------------
@@ -396,7 +426,15 @@ echo.
 
 :FINAL_MENU
 
-choice /C CR /N /M "Select an option [C/R]: "
+choice /C CRS /N /M "Select an option [C/R/S]: "
+
+if errorlevel 3 (
+    echo.
+    echo Switching User...
+    echo.
+    tsdiscon
+    exit /b 0
+)
 
 if errorlevel 2 (
     goto START
