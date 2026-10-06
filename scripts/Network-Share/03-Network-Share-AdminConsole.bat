@@ -58,8 +58,9 @@ rem   15. Existing client entries are never automatically removed.
 rem   16. Removing a client removes ONLY its local registry entry.
 rem   17. LAN discovery does not modify remote computers.
 rem   18. SMB share data is never modified by this console.
-rem   19. Exit requires explicit confirmation.
+rem   19. Security diagnostics are READ-ONLY.
 rem   20. This console does NOT automatically close.
+rem   21. Only Q -> Y may close the console.
 rem
 rem ============================================================
 
@@ -91,12 +92,6 @@ set "ScanSubnet=192.168.1."
 set "ScanStart=1"
 set "ScanEnd=254"
 set "PingTimeout=100"
-
-rem ------------------------------------------------------------
-rem DEFAULT TEST CONFIGURATION
-rem ------------------------------------------------------------
-
-set "WinRMTimeout=5"
 
 
 rem ============================================================
@@ -349,49 +344,39 @@ echo.
 
 choice /C 123456789ABCDEFGHQ /N /M "Select option: "
 
+set "MenuChoice=%errorlevel%"
 
-rem
-rem CHOICE positions:
-rem
-rem  1 = 1
-rem  2 = 2
-rem  3 = 3
-rem  4 = 4
-rem  5 = 5
-rem  6 = 6
-rem  7 = 7
-rem  8 = 8
-rem  9 = 9
-rem 10 = A
-rem 11 = B
-rem 12 = C
-rem 13 = D
-rem 14 = E
-rem 15 = F
-rem 16 = G
-rem 17 = H
-rem 18 = Q
-rem
 
-if errorlevel 18 goto EXIT
-if errorlevel 17 goto SCAN_LAN
-if errorlevel 16 goto VIEW_LOG
-if errorlevel 15 goto CHECK_SHARE
-if errorlevel 14 goto NETWORK
-if errorlevel 13 goto ADMIN_FOLDER
-if errorlevel 12 goto RELOAD
-if errorlevel 11 goto REMOVE_PC
-if errorlevel 10 goto ADD_PC
-if errorlevel 9 goto OPEN_SHARE
-if errorlevel 8 goto SHUTDOWN_PC
-if errorlevel 7 goto RESTART_PC
-if errorlevel 6 goto REMOTE_SHELL
-if errorlevel 5 goto REMOTE_COMMAND
-if errorlevel 4 goto REMOTE_INFO
-if errorlevel 3 goto TEST_ONE
-if errorlevel 2 goto TEST_ALL
-if errorlevel 1 goto SHOW_CLIENTS
+rem ------------------------------------------------------------
+rem MENU ROUTING
+rem ------------------------------------------------------------
 
+if "%MenuChoice%"=="18" goto EXIT_CONFIRMATION
+if "%MenuChoice%"=="17" goto SCAN_LAN
+if "%MenuChoice%"=="16" goto VIEW_LOG
+if "%MenuChoice%"=="15" goto CHECK_SHARE
+if "%MenuChoice%"=="14" goto NETWORK
+if "%MenuChoice%"=="13" goto ADMIN_FOLDER
+if "%MenuChoice%"=="12" goto RELOAD
+if "%MenuChoice%"=="11" goto REMOVE_PC
+if "%MenuChoice%"=="10" goto ADD_PC
+if "%MenuChoice%"=="9" goto OPEN_SHARE
+if "%MenuChoice%"=="8" goto SHUTDOWN_PC
+if "%MenuChoice%"=="7" goto RESTART_PC
+if "%MenuChoice%"=="6" goto REMOTE_SHELL
+if "%MenuChoice%"=="5" goto REMOTE_COMMAND
+if "%MenuChoice%"=="4" goto REMOTE_INFO
+if "%MenuChoice%"=="3" goto TEST_ONE
+if "%MenuChoice%"=="2" goto TEST_ALL
+if "%MenuChoice%"=="1" goto SHOW_CLIENTS
+
+rem ------------------------------------------------------------
+rem SAFETY GUARD
+rem ------------------------------------------------------------
+rem
+rem If CHOICE ever returns an unexpected value, DO NOT allow
+rem the script to fall through into another label.
+rem
 goto MENU
 
 
@@ -1035,19 +1020,23 @@ Invoke-Command -ComputerName $Target -ScriptBlock { Restart-Computer -Force }"
 
 if errorlevel 1 (
     echo.
-    echo [ERROR] Restart command failed.
-    call :LOG "Remote restart failed for %TargetPC%."
+    echo [WARNING] Restart request returned a non-zero result.
+    echo [INFO] The computer may already have begun restarting.
+    call :LOG "Remote restart request returned non-zero for %TargetPC%."
 ) else (
     echo.
-    echo [OK] Restart command sent to %TargetPC%.
-    call :LOG "Remote restart command sent to %TargetPC%."
+    echo [OK] Restart request sent to %TargetPC%.
+    call :LOG "Remote restart request sent to %TargetPC%."
 )
+
+echo.
+echo [INFO] Remote connectivity may now be unavailable.
+echo.
 
 set "TARGET_PC="
 
-set "LastAction=Restart command sent to %TargetPC%."
+set "LastAction=Restart request sent to %TargetPC%."
 
-echo.
 call :WAIT_FOR_USER
 goto MENU
 
@@ -1124,19 +1113,23 @@ Invoke-Command -ComputerName $Target -ScriptBlock { Stop-Computer -Force }"
 
 if errorlevel 1 (
     echo.
-    echo [ERROR] Shutdown command failed.
-    call :LOG "Remote shutdown failed for %TargetPC%."
+    echo [WARNING] Shutdown request returned a non-zero result.
+    echo [INFO] The computer may already have begun shutting down.
+    call :LOG "Remote shutdown request returned non-zero for %TargetPC%."
 ) else (
     echo.
-    echo [OK] Shutdown command sent to %TargetPC%.
-    call :LOG "Remote shutdown command sent to %TargetPC%."
+    echo [OK] Shutdown request sent to %TargetPC%.
+    call :LOG "Remote shutdown request sent to %TargetPC%."
 )
+
+echo.
+echo [INFO] Remote connectivity may now be unavailable.
+echo.
 
 set "TARGET_PC="
 
-set "LastAction=Shutdown command sent to %TargetPC%."
+set "LastAction=Shutdown request sent to %TargetPC%."
 
-echo.
 call :WAIT_FOR_USER
 goto MENU
 
@@ -1366,17 +1359,45 @@ if errorlevel 2 (
 
 set "TempClientList=%ClientList%.tmp"
 
+rem ------------------------------------------------------------
+rem SAFETY:
+rem NEVER delete an unrelated pre-existing temp file.
+rem ------------------------------------------------------------
+
 if exist "%TempClientList%" (
-    del /q "%TempClientList%" >nul 2>&1
+    echo.
+    echo [ERROR] Temporary file already exists:
+    echo     %TempClientList%
+    echo.
+    echo Operation cancelled to preserve the existing file.
+    echo.
+    call :WAIT_FOR_USER
+    goto MENU
 )
 
 findstr /I /V /X /C:"%RemovePC%" "%ClientList%" >"%TempClientList%"
 
-if not exist "%TempClientList%" (
+if errorlevel 1 (
     echo.
     echo [ERROR] Could not create temporary client registry.
     echo.
     echo Original client registry was preserved.
+    echo.
+
+    if exist "%TempClientList%" (
+        del /q "%TempClientList%" >nul 2>&1
+    )
+
+    call :WAIT_FOR_USER
+    goto MENU
+)
+
+if not exist "%TempClientList%" (
+    echo.
+    echo [ERROR] Temporary client registry was not created.
+    echo.
+    echo Original client registry was preserved.
+    echo.
     call :WAIT_FOR_USER
     goto MENU
 )
@@ -1389,10 +1410,12 @@ if errorlevel 1 (
     echo.
     echo The original registry was preserved if replacement failed.
     echo.
+
     if exist "%TempClientList%" (
         echo Temporary file retained:
         echo     %TempClientList%
     )
+
     call :WAIT_FOR_USER
     goto MENU
 )
@@ -1602,48 +1625,44 @@ echo     \\%ServerName%\%ShareName%
 echo.
 
 echo ============================================================
-echo WINDOWS SMB SHARE
+echo SERVER TCP 445 TEST
 echo ============================================================
 echo.
 
-net share "%ShareName%"
+set "TARGET_PC=%ServerName%"
+
+powershell.exe -NoProfile -Command ^
+"$t=$env:TARGET_PC; ^
+$r=Test-NetConnection -ComputerName $t -Port 445 -WarningAction SilentlyContinue; ^
+if ($r.TcpTestSucceeded) { Write-Host '[OK] TCP 445 is reachable.' } else { Write-Host '[WARNING] TCP 445 is NOT reachable.'; exit 1 }"
 
 if errorlevel 1 (
-
-    set "ShareStatus=NOT FOUND"
-
     echo.
-    echo [ERROR] SMB share "%ShareName%" was not found.
-    echo.
-
-    call :LOG "SMB share %ShareName% was not found."
-
+    echo [WARNING] SMB TCP connectivity to %ServerName% failed.
 ) else (
-
-    set "ShareStatus=EXISTS"
-
     echo.
-    echo [OK] SMB share "%ShareName%" exists.
-    echo.
-
-    call :LOG "SMB share %ShareName% verified."
+    echo [OK] SMB TCP connectivity is available.
 )
 
-echo.
-echo ============================================================
-echo SMB SERVER SERVICE
-echo ============================================================
-echo.
-
-sc query LanmanServer
+set "TARGET_PC="
 
 echo.
 echo ============================================================
-echo SMB CLIENT CONNECTIONS
+echo SERVER SHARE ENUMERATION
 echo ============================================================
 echo.
 
-net use
+net view "\\%ServerName%" /all
+
+if errorlevel 1 (
+    echo.
+    echo [WARNING] Windows could not enumerate shares on %ServerName%.
+    echo.
+    echo Direct share access will be tested below.
+) else (
+    echo.
+    echo [OK] Server share enumeration completed.
+)
 
 echo.
 echo ============================================================
@@ -1660,6 +1679,8 @@ echo.
 dir "\\%ServerName%\%ShareName%" >nul 2>&1
 
 if errorlevel 1 (
+    set "ShareStatus=ACCESS FAILED"
+
     echo [WARNING] Direct SMB share access failed.
     echo.
     echo Possible causes include:
@@ -1669,9 +1690,24 @@ if errorlevel 1 (
     echo     - NTFS permissions
     echo     - Name resolution
     echo     - Server availability
+
+    call :LOG "Direct SMB share access failed for \\%ServerName%\%ShareName%."
+
 ) else (
+    set "ShareStatus=ACCESS OK"
+
     echo [OK] Direct SMB share access succeeded.
+
+    call :LOG "Direct SMB share access succeeded for \\%ServerName%\%ShareName%."
 )
+
+echo.
+echo ============================================================
+echo SMB CLIENT CONNECTIONS
+echo ============================================================
+echo.
+
+net use
 
 echo.
 
@@ -2033,11 +2069,6 @@ exit /b 0
 rem ============================================================
 rem NORMALIZE TARGET
 rem ============================================================
-rem
-rem Removes leading/trailing whitespace from a target variable.
-rem
-rem Computer names and IP addresses should not contain spaces.
-rem
 
 :NORMALIZE_TARGET
 
@@ -2094,7 +2125,7 @@ rem ============================================================
 
 echo.
 echo ============================================================
-echo Press any key to continue...
+echo Press any key to return to the main menu...
 echo ============================================================
 pause >nul
 
@@ -2105,7 +2136,7 @@ rem ============================================================
 rem EXIT CONFIRMATION
 rem ============================================================
 
-:EXIT
+:EXIT_CONFIRMATION
 cls
 
 echo ============================================================
@@ -2162,11 +2193,35 @@ if errorlevel 2 (
     echo.
     echo [INFO] Exit cancelled.
     echo.
+    set "LastAction=Exit cancelled."
     call :WAIT_FOR_USER
     goto MENU
 )
 
-call :LOG "Administration Console closed."
+goto CLOSE_CONSOLE
+
+
+rem ============================================================
+rem CLOSE CONSOLE
+rem ============================================================
+rem
+rem IMPORTANT:
+rem
+rem This is the ONLY location in the entire script that may
+rem terminate the batch process.
+rem
+rem Normal operations NEVER reach this label.
+rem Only:
+rem
+rem     Q -> Exit
+rem     Y -> Confirm Exit
+rem
+rem reaches this label.
+rem
+
+:CLOSE_CONSOLE
+
+call :LOG "Administration Console closed by user confirmation."
 
 cls
 
@@ -2212,8 +2267,28 @@ echo No passwords were stored.
 echo.
 echo ============================================================
 echo.
+echo The console will close because Exit was explicitly confirmed.
+echo.
+echo ============================================================
+echo.
 
-timeout /t 2 /nobreak >nul
+pause
 
 endlocal
-exit
+exit /b
+
+
+rem ============================================================
+rem SAFETY END GUARD
+rem ============================================================
+rem
+rem If execution somehow reaches the physical end of this BAT
+rem without going through CLOSE_CONSOLE, keep the console alive
+rem by returning to the menu instead of allowing an unexpected
+rem termination.
+rem
+rem ============================================================
+
+:END_GUARD
+
+goto MENU

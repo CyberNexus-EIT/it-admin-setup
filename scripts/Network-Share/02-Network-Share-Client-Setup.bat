@@ -17,7 +17,8 @@ rem      - WinRM connectivity
 rem      - SMB network share access
 rem      - Administration PC connectivity
 rem      - Network diagnostics
-rem      - Basic read-only security diagnostics
+rem      - Security diagnostics
+rem      - Explicit client-side security hardening
 rem
 rem  STANDARD ADMINISTRATION SERVER:
 rem
@@ -28,19 +29,15 @@ rem
 rem      D:\IT-Admin
 rem
 rem  LOCAL ADMIN CONSOLE DATA:
-rem
 rem      D:\AdminConsole
 rem
 rem  SHARED DATA:
-rem
 rem      D:\Share
 rem
 rem  NETWORK SHARE:
-rem
 rem      \\IT-SERVER\Share
 rem
 rem  NETWORK SHARE ACCOUNT:
-rem
 rem      ShareUser
 rem
 rem ============================================================
@@ -62,12 +59,14 @@ rem        configuration was explicitly skipped.
 rem   12.  Existing configuration is preserved unless the user
 rem        explicitly saves a new Administration PC.
 rem   13.  Automated troubleshooting is READ-ONLY.
-rem   14.  Security diagnostics are READ-ONLY.
+rem   14.  Security audit is READ-ONLY until hardening is
+rem        explicitly requested.
 rem   15.  No automatic firewall changes are performed.
-rem   16.  No automatic SMB changes are performed.
+rem   16.  No automatic SMB server/share changes are performed.
 rem   17.  No automatic account/password changes are performed.
-rem   18.  This console does NOT automatically close.
-rem   19.  Exit always requires explicit confirmation.
+rem   18.  Security hardening requires explicit confirmation.
+rem   19.  This console does NOT automatically close.
+rem   20.  Exit always requires explicit confirmation.
 rem
 rem ============================================================
 
@@ -106,8 +105,12 @@ set "BrowseStatus=NOT CHECKED"
 
 set "TroubleshootStatus=NOT RUN"
 set "SecurityAuditStatus=NOT RUN"
+set "SecurityHardeningStatus=NOT RUN"
 
 set "WinRMChangeRequested=NO"
+
+set "SetupWarnings=0"
+set "SetupErrors=0"
 
 
 goto START
@@ -165,8 +168,8 @@ if errorlevel 1 (
     echo.
     echo Diagnostic functions remain available.
     echo.
-    echo WinRM configuration and some security diagnostics
-    echo may require Administrator privileges.
+    echo WinRM configuration and security hardening
+    echo require Administrator privileges.
 ) else (
     set "AdminStatus=ADMINISTRATOR"
 
@@ -203,6 +206,7 @@ echo Client setup console is ready.
 echo.
 echo No files or folders will be automatically deleted.
 echo No passwords will be stored.
+echo Security hardening requires explicit confirmation.
 echo.
 echo Press any key to continue to the menu.
 pause >nul
@@ -278,6 +282,9 @@ echo.
 echo Security Audit:
 echo     %SecurityAuditStatus%
 echo.
+echo Security Hardening:
+echo     %SecurityHardeningStatus%
+echo.
 echo ============================================================
 echo.
 echo [1] Configure / Re-run Client Setup
@@ -351,6 +358,11 @@ goto MENU
 
 rem ============================================================
 rem RUN CLIENT SETUP
+rem
+rem Setup steps run continuously.
+rem There are NO pauses between setup steps.
+rem
+rem One final pause occurs after the complete setup summary.
 rem ============================================================
 
 :RUN_SETUP
@@ -415,16 +427,25 @@ echo.
 echo WinRM configuration is the only system configuration
 echo performed by this setup.
 echo.
+echo Security hardening is NOT performed by this setup.
+echo Use menu [H] for security audit and explicit hardening.
+echo.
 
 choice /C YN /N /M "Continue with client setup? [Y/N]: "
 
 if errorlevel 2 (
+
     echo.
     echo [CANCELLED] Client setup was not performed.
     echo.
+
     call :WAIT_FOR_USER
     goto MENU
 )
+
+set "SetupWarnings=0"
+set "SetupErrors=0"
+set "WinRMChangeRequested=NO"
 
 
 rem ============================================================
@@ -448,6 +469,7 @@ if errorlevel 1 (
     echo Windows edition.
 
     set "WinRMStatus=SERVICE UNAVAILABLE"
+    set /a SetupWarnings+=1
 
 ) else (
 
@@ -457,14 +479,10 @@ if errorlevel 1 (
 
 echo.
 
-call :WAIT_FOR_USER
-
 
 rem ============================================================
 rem STEP 2 - WINRM CONFIGURATION
 rem ============================================================
-
-cls
 
 echo ============================================================
 echo             [2/5] WINRM CONFIGURATION
@@ -508,6 +526,7 @@ if errorlevel 2 (
         echo.
         echo [WARNING] WinRM configuration returned an error.
         set "WinRMStatus=CONFIGURATION FAILED"
+        set /a SetupErrors+=1
     ) else (
         echo.
         echo [OK] WinRM configuration completed.
@@ -518,14 +537,10 @@ if errorlevel 2 (
 
 echo.
 
-call :WAIT_FOR_USER
-
 
 rem ============================================================
 rem STEP 3 - WINRM SERVICE
 rem ============================================================
-
-cls
 
 echo ============================================================
 echo               [3/5] WINRM SERVICE
@@ -542,6 +557,7 @@ if errorlevel 1 (
 
     echo [ERROR] WinRM service is unavailable.
     set "WinRMStatus=SERVICE UNAVAILABLE"
+    set /a SetupErrors+=1
 
 ) else (
 
@@ -564,6 +580,7 @@ if errorlevel 1 (
                 echo.
                 echo [WARNING] WinRM service could not be started.
                 set "WinRMStatus=SERVICE START FAILED"
+                set /a SetupErrors+=1
             ) else (
                 echo.
                 echo [OK] WinRM service started.
@@ -591,14 +608,10 @@ if errorlevel 1 (
 
 echo.
 
-call :WAIT_FOR_USER
-
 
 rem ============================================================
 rem STEP 4 - LOCAL WINRM TEST
 rem ============================================================
-
-cls
 
 echo ============================================================
 echo              [4/5] LOCAL WINRM TEST
@@ -619,6 +632,8 @@ if errorlevel 1 (
         set "WinRMStatus=LOCAL TEST FAILED"
     )
 
+    set /a SetupWarnings+=1
+
 ) else (
 
     echo.
@@ -629,14 +644,10 @@ if errorlevel 1 (
 
 echo.
 
-call :WAIT_FOR_USER
-
 
 rem ============================================================
 rem STEP 5 - CLIENT CONFIGURATION
 rem ============================================================
-
-cls
 
 echo ============================================================
 echo             [5/5] CLIENT CONFIGURATION
@@ -653,6 +664,7 @@ if not exist "%ConfigDir%\" (
 
     if errorlevel 1 (
         echo [WARNING] Could not create configuration directory.
+        set /a SetupErrors+=1
     ) else (
         echo [OK] Configuration directory created.
     )
@@ -671,6 +683,7 @@ if defined AdminPC (
 
     if errorlevel 1 (
         echo [WARNING] Configuration could not be saved.
+        set /a SetupErrors+=1
     ) else (
         echo [OK] Administration PC configuration saved.
     )
@@ -683,6 +696,116 @@ if defined AdminPC (
 
 echo.
 
+
+rem ============================================================
+rem FINAL VERIFICATION
+rem ============================================================
+
+echo ============================================================
+echo                  FINAL VERIFICATION
+echo ============================================================
+echo.
+
+echo [1] Checking Administration PC...
+echo.
+
+if defined AdminPC (
+    echo [OK] Administration PC:
+    echo     %AdminPC%
+) else (
+    echo [WARNING] Administration PC is not configured.
+    set /a SetupWarnings+=1
+)
+
+echo.
+
+echo [2] Checking network share path...
+echo.
+
+call :UPDATE_SHARE_PATH
+
+if defined NetworkSharePath (
+    echo [OK] Network Share:
+    echo     %NetworkSharePath%
+) else (
+    echo [WARNING] Network Share path is not available.
+    set /a SetupWarnings+=1
+)
+
+echo.
+
+echo [3] Checking local configuration...
+echo.
+
+if exist "%ConfigFile%" (
+    echo [OK] Configuration file exists:
+    echo     %ConfigFile%
+) else (
+    echo [WARNING] Configuration file was not found.
+    set /a SetupWarnings+=1
+)
+
+echo.
+
+echo [4] Checking WinRM service...
+echo.
+
+sc query WinRM >nul 2>&1
+
+if errorlevel 1 (
+    echo [WARNING] WinRM service is unavailable.
+    set /a SetupWarnings+=1
+) else (
+    echo [OK] WinRM service is available.
+)
+
+echo.
+
+echo [5] Checking local WinRM...
+echo.
+
+powershell.exe -NoProfile -Command ^
+    "Test-WSMan -ComputerName localhost -ErrorAction Stop" >nul 2>&1
+
+if errorlevel 1 (
+    echo [WARNING] Local WinRM verification failed.
+    set /a SetupWarnings+=1
+) else (
+    echo [OK] Local WinRM verification passed.
+)
+
+echo.
+
+echo [6] Checking preservation targets...
+echo.
+
+if exist "D:\IT-Admin\" (
+    echo [OK] D:\IT-Admin exists and was not modified by this script.
+) else (
+    echo [INFO] D:\IT-Admin does not exist.
+)
+
+if exist "D:\Share\" (
+    echo [OK] D:\Share exists and was not modified by this script.
+) else (
+    echo [INFO] D:\Share does not exist.
+)
+
+if exist "D:\Share\Client\" (
+    echo [KEEP] Existing D:\Share\Client detected.
+    echo [KEEP] Existing D:\Share\Client was NOT modified.
+) else (
+    echo [OK] D:\Share\Client does not exist.
+    echo [OK] This script did NOT create it.
+)
+
+echo.
+
+
+rem ============================================================
+rem COMPLETE SETUP SUMMARY
+rem ============================================================
+
 echo ============================================================
 echo                    SETUP RESULTS
 echo ============================================================
@@ -690,6 +813,10 @@ echo.
 
 echo Client:
 echo     %COMPUTERNAME%
+echo.
+
+echo Administrator:
+echo     %AdminStatus%
 echo.
 
 echo Administration PC:
@@ -716,6 +843,14 @@ echo.
 
 echo Local Configuration:
 echo     %ConfigFile%
+echo.
+
+echo Setup Errors:
+echo     %SetupErrors%
+echo.
+
+echo Setup Warnings:
+echo     %SetupWarnings%
 echo.
 
 echo ============================================================
@@ -755,7 +890,26 @@ echo Deleted folders:
 echo     NONE
 echo.
 
-call :WAIT_FOR_USER
+echo ============================================================
+echo                    FINAL STATUS
+echo ============================================================
+echo.
+
+if "%SetupErrors%"=="0" if "%SetupWarnings%"=="0" (
+    echo [OK] CLIENT SETUP COMPLETED SUCCESSFULLY.
+) else if "%SetupErrors%"=="0" (
+    echo [WARNING] CLIENT SETUP COMPLETED WITH WARNINGS.
+) else (
+    echo [ERROR] CLIENT SETUP COMPLETED WITH ERRORS.
+)
+
+echo.
+echo ============================================================
+echo.
+echo Press any key to return to the main menu...
+echo ============================================================
+pause >nul
+
 goto MENU
 
 
@@ -806,12 +960,6 @@ if not defined NewAdminPC (
     call :WAIT_FOR_USER
     goto MENU
 )
-
-rem ------------------------------------------------------------
-rem Normalize spaces.
-rem Windows computer names and IPv4 addresses do not contain
-rem spaces, so only the first whitespace-delimited token is used.
-rem ------------------------------------------------------------
 
 for /f "tokens=1" %%A in ("%NewAdminPC%") do set "NewAdminPC=%%A"
 
@@ -1598,9 +1746,14 @@ echo.
 echo [9] Security Audit
 echo.
 echo     READ-ONLY
-echo     No firewall changes
-echo     No WinRM changes
-echo     No SMB changes
+echo     No changes until explicit hardening confirmation
+echo.
+
+echo [10] Security Hardening
+echo.
+echo     EXPLICIT ADMINISTRATOR ACTION REQUIRED
+echo     No passwords stored
+echo     No file deletion
 echo.
 
 echo ============================================================
@@ -1809,14 +1962,9 @@ echo Network Share:
 echo     %NetworkSharePath%
 echo.
 
-call :WAIT_FOR_USER
-
-
 rem ------------------------------------------------------------
 rem TEST 1 - TARGET
 rem ------------------------------------------------------------
-
-cls
 
 echo ============================================================
 echo                  [1/8] TARGET CHECK
@@ -1836,14 +1984,10 @@ if defined TARGET_PC (
 
 echo.
 
-call :WAIT_FOR_USER
-
 
 rem ------------------------------------------------------------
 rem TEST 2 - PING
 rem ------------------------------------------------------------
-
-cls
 
 echo ============================================================
 echo                    [2/8] PING
@@ -1852,6 +1996,9 @@ echo.
 
 echo Target:
 echo     %TARGET_PC%
+echo.
+
+echo Sending 4 ICMP requests...
 echo.
 
 ping "%TARGET_PC%" -n 4
@@ -1868,14 +2015,10 @@ if errorlevel 1 (
 
 echo.
 
-call :WAIT_FOR_USER
-
 
 rem ------------------------------------------------------------
 rem TEST 3 - NAME RESOLUTION
 rem ------------------------------------------------------------
-
-cls
 
 echo ============================================================
 echo              [3/8] NAME RESOLUTION
@@ -1888,7 +2031,11 @@ powershell.exe -NoProfile -Command ^
 if errorlevel 1 (
     set "NameResolutionStatus=FAILED"
     echo.
-    echo [FAIL] Name resolution failed.
+    echo [WARNING] DNS/name resolution failed.
+    echo.
+    echo NOTE:
+    echo A Windows LAN computer may still be reachable through
+    echo NetBIOS or SMB even when DNS resolution fails.
 ) else (
     set "NameResolutionStatus=READY"
     echo.
@@ -1897,14 +2044,10 @@ if errorlevel 1 (
 
 echo.
 
-call :WAIT_FOR_USER
-
 
 rem ------------------------------------------------------------
 rem TEST 4 - SMB PORT
 rem ------------------------------------------------------------
-
-cls
 
 echo ============================================================
 echo                 [4/8] TCP PORT 445
@@ -1926,14 +2069,10 @@ if errorlevel 1 (
 
 echo.
 
-call :WAIT_FOR_USER
-
 
 rem ------------------------------------------------------------
 rem TEST 5 - DIRECT SMB SHARE
 rem ------------------------------------------------------------
-
-cls
 
 echo ============================================================
 echo                 [5/8] DIRECT SMB SHARE
@@ -1971,14 +2110,10 @@ if errorlevel 1 (
 
 echo.
 
-call :WAIT_FOR_USER
-
 
 rem ------------------------------------------------------------
 rem TEST 6 - NETWORK BROWSING
 rem ------------------------------------------------------------
-
-cls
 
 echo ============================================================
 echo              [6/8] NETWORK BROWSING
@@ -2016,14 +2151,10 @@ if errorlevel 1 (
 
 echo.
 
-call :WAIT_FOR_USER
-
 
 rem ------------------------------------------------------------
 rem TEST 7 - WINRM
 rem ------------------------------------------------------------
-
-cls
 
 echo ============================================================
 echo                    [7/8] WINRM
@@ -2064,14 +2195,10 @@ if errorlevel 1 (
 
 echo.
 
-call :WAIT_FOR_USER
-
 
 rem ------------------------------------------------------------
 rem TEST 8 - CONCLUSION
 rem ------------------------------------------------------------
-
-cls
 
 echo ============================================================
 echo               [8/8] DIAGNOSTIC CONCLUSION
@@ -2206,9 +2333,10 @@ echo             LOCAL SECURITY / WINRM AUDIT
 echo ============================================================
 echo.
 
-echo This is a READ-ONLY audit.
+echo This audit is READ-ONLY until explicit hardening
+echo confirmation is provided.
 echo.
-echo It does NOT:
+echo The audit does NOT automatically:
 echo.
 echo     - modify firewall rules
 echo     - modify WinRM
@@ -2218,16 +2346,14 @@ echo     - change accounts
 echo     - change passwords
 echo     - delete files
 echo.
-echo ============================================================
-echo.
 
 set "SecurityAuditStatus=RUNNING"
 
 call :REQUIRE_ADMIN_READONLY
 
-echo ------------------------------------------------------------
+echo ============================================================
 echo [1] NETWORK PROFILE
-echo ------------------------------------------------------------
+echo ============================================================
 echo.
 
 powershell.exe -NoProfile -Command ^
@@ -2238,9 +2364,9 @@ if errorlevel 1 (
 )
 
 echo.
-echo ------------------------------------------------------------
+echo ============================================================
 echo [2] WINDOWS FIREWALL PROFILES
-echo ------------------------------------------------------------
+echo ============================================================
 echo.
 
 powershell.exe -NoProfile -Command ^
@@ -2251,17 +2377,17 @@ if errorlevel 1 (
 )
 
 echo.
-echo ------------------------------------------------------------
+echo ============================================================
 echo [3] WINRM SERVICE
-echo ------------------------------------------------------------
+echo ============================================================
 echo.
 
 sc query WinRM
 
 echo.
-echo ------------------------------------------------------------
+echo ============================================================
 echo [4] WINRM LISTENER
-echo ------------------------------------------------------------
+echo ============================================================
 echo.
 
 winrm enumerate winrm/config/listener
@@ -2271,9 +2397,9 @@ if errorlevel 1 (
 )
 
 echo.
-echo ------------------------------------------------------------
+echo ============================================================
 echo [5] WINRM CONFIGURATION
-echo ------------------------------------------------------------
+echo ============================================================
 echo.
 
 winrm get winrm/config
@@ -2283,43 +2409,48 @@ if errorlevel 1 (
 )
 
 echo.
-echo ------------------------------------------------------------
+echo ============================================================
 echo [6] WINRM FIREWALL RULES
-echo ------------------------------------------------------------
+echo ============================================================
 echo.
 
 powershell.exe -NoProfile -Command ^
-    "Get-NetFirewallRule -DisplayGroup 'Windows Remote Management' -ErrorAction SilentlyContinue | Select-Object DisplayName,Enabled,Profile,Direction,Action | Format-Table -AutoSize"
-
-if errorlevel 1 (
-    echo [WARNING] WinRM firewall rules could not be queried.
-)
+    "$r=Get-NetFirewallRule -DisplayGroup 'Windows Remote Management' -ErrorAction SilentlyContinue; if($r){$r | Select-Object DisplayName,Enabled,Profile,Direction,Action | Format-Table -AutoSize}else{Write-Host '[INFO] No Windows Remote Management firewall rules returned.'}"
 
 echo.
-echo ------------------------------------------------------------
-echo [7] SMB CLIENT CONFIGURATION
-echo ------------------------------------------------------------
+echo ============================================================
+echo [7] SMB CLIENT SECURITY
+echo ============================================================
 echo.
 
 powershell.exe -NoProfile -Command ^
-    "Get-SmbClientConfiguration | Select-Object EnableSecuritySignature,RequireSecuritySignature,EnableInsecureGuestLogons | Format-List"
+    "$c=Get-SmbClientConfiguration; [pscustomobject]@{EnableSecuritySignature=$c.EnableSecuritySignature;RequireSecuritySignature=$c.RequireSecuritySignature;EnableInsecureGuestLogons=$c.EnableInsecureGuestLogons} | Format-List"
 
 if errorlevel 1 (
     echo [WARNING] SMB client configuration unavailable.
 )
 
 echo.
-echo ------------------------------------------------------------
-echo [8] SMB CONNECTIONS
-echo ------------------------------------------------------------
+echo ============================================================
+echo [8] LLMNR STATUS
+echo ============================================================
+echo.
+
+powershell.exe -NoProfile -Command ^
+    "$p='HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient'; $v=Get-ItemProperty -Path $p -Name EnableMulticast -ErrorAction SilentlyContinue; if($null -eq $v){Write-Host 'EnableMulticast : NOT CONFIGURED (Windows default behavior may be active)'}else{Write-Host ('EnableMulticast : ' + $v.EnableMulticast)}"
+
+echo.
+echo ============================================================
+echo [9] SMB CONNECTIONS
+echo ============================================================
 echo.
 
 net use
 
 echo.
-echo ------------------------------------------------------------
-echo [9] LOCAL ADMINISTRATORS
-echo ------------------------------------------------------------
+echo ============================================================
+echo [10] LOCAL ADMINISTRATORS
+echo ============================================================
 echo.
 
 net localgroup Administrators
@@ -2329,9 +2460,9 @@ if errorlevel 1 (
 )
 
 echo.
-echo ------------------------------------------------------------
-echo [10] GUEST ACCOUNT
-echo ------------------------------------------------------------
+echo ============================================================
+echo [11] GUEST ACCOUNT
+echo ============================================================
 echo.
 
 net user Guest
@@ -2342,28 +2473,255 @@ if errorlevel 1 (
 
 echo.
 echo ============================================================
-echo SECURITY AUDIT NOTES
+echo SECURITY AUDIT SUMMARY
 echo ============================================================
 echo.
-echo [INFO] This audit does not automatically harden the client.
+
+echo The following items should be reviewed:
 echo.
-echo Any security changes must be reviewed and explicitly
-echo performed by an administrator.
+echo     1. SMB insecure guest logons
+echo     2. SMB signing
+echo     3. LLMNR
+echo     4. Public-profile WinRM firewall rules
+echo     5. Public-profile SMB/File and Printer Sharing rules
+echo     6. Local Administrators membership
+echo     7. Guest account state
+echo     8. WinRM authentication/configuration
 echo.
-echo In particular, do NOT automatically:
+echo NOTE:
+echo Server-side share permissions and server-side firewall
+echo settings are NOT modified by this client script.
 echo.
-echo     - enable broad firewall rules
-echo     - enable insecure guest SMB access
-echo     - disable SMB signing
-echo     - weaken WinRM authentication
-echo     - store passwords in scripts
+echo They must be handled by the server administration script.
 echo.
-echo ============================================================
 
 set "SecurityAuditStatus=COMPLETED"
 
+echo ============================================================
+echo.
+echo Security audit completed.
+echo.
+echo Would you like to perform the explicit client-side
+echo security hardening actions now?
+echo.
+echo Hardening actions:
+echo.
+echo     [1] Disable insecure SMB guest logons
+echo     [2] Enable SMB signing
+echo     [3] Require SMB signing
+echo     [4] Disable LLMNR
+echo.
+echo These actions require Administrator privileges.
+echo.
+
+if /I not "%AdminStatus%"=="ADMINISTRATOR" (
+
+    echo [INFO] This session is not elevated.
+    echo [INFO] Security hardening is unavailable.
+    echo.
+
+    call :WAIT_FOR_USER
+    goto MENU
+)
+
+choice /C YN /N /M "Apply client security hardening? [Y/N]: "
+
+if errorlevel 2 (
+
+    echo.
+    echo [SKIPPED] Security hardening was not performed.
+    echo.
+
+    call :WAIT_FOR_USER
+    goto MENU
+)
+
+call :SECURITY_HARDEN
+
 call :WAIT_FOR_USER
 goto MENU
+
+
+rem ============================================================
+rem CLIENT SECURITY HARDENING
+rem ============================================================
+
+:SECURITY_HARDEN
+
+cls
+
+echo ============================================================
+echo              CLIENT SECURITY HARDENING
+echo ============================================================
+echo.
+
+if /I not "%AdminStatus%"=="ADMINISTRATOR" (
+
+    echo [ERROR] Administrator privileges are required.
+    set "SecurityHardeningStatus=FAILED - NOT ADMINISTRATOR"
+    echo.
+
+    exit /b 1
+)
+
+echo IMPORTANT:
+echo.
+echo This operation changes LOCAL CLIENT security settings.
+echo.
+echo It does NOT:
+echo.
+echo     - modify D:\IT-Admin
+echo     - modify D:\Share
+echo     - modify D:\Share\Client
+echo     - delete files
+echo     - delete SMB shares
+echo     - change passwords
+echo     - modify server-side share permissions
+echo.
+echo ============================================================
+echo.
+
+set "HardeningErrors=0"
+
+echo [1/4] Disable insecure SMB guest logons
+echo ------------------------------------------------------------
+echo.
+
+powershell.exe -NoProfile -Command ^
+    "Set-SmbClientConfiguration -EnableInsecureGuestLogons $false -Force"
+
+if errorlevel 1 (
+    echo [ERROR] Could not disable insecure SMB guest logons.
+    set /a HardeningErrors+=1
+) else (
+    echo [OK] Insecure SMB guest logons disabled.
+)
+
+echo.
+
+
+echo [2/4] Enable SMB signing
+echo ------------------------------------------------------------
+echo.
+
+powershell.exe -NoProfile -Command ^
+    "Set-SmbClientConfiguration -EnableSecuritySignature $true -Force"
+
+if errorlevel 1 (
+    echo [ERROR] Could not enable SMB signing.
+    set /a HardeningErrors+=1
+) else (
+    echo [OK] SMB signing enabled.
+)
+
+echo.
+
+
+echo [3/4] Require SMB signing
+echo ------------------------------------------------------------
+echo.
+
+powershell.exe -NoProfile -Command ^
+    "Set-SmbClientConfiguration -RequireSecuritySignature $true -Force"
+
+if errorlevel 1 (
+    echo [ERROR] Could not require SMB signing.
+    set /a HardeningErrors+=1
+) else (
+    echo [OK] SMB signing is now required by the client.
+)
+
+echo.
+
+
+echo [4/4] Disable LLMNR
+echo ------------------------------------------------------------
+echo.
+
+powershell.exe -NoProfile -Command ^
+    "$p='HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient'; if(-not (Test-Path $p)){New-Item -Path $p -Force | Out-Null}; New-ItemProperty -Path $p -Name EnableMulticast -PropertyType DWord -Value 0 -Force | Out-Null"
+
+if errorlevel 1 (
+    echo [ERROR] Could not configure LLMNR disable policy.
+    set /a HardeningErrors+=1
+) else (
+    echo [OK] LLMNR disable policy configured.
+    echo [INFO] A restart or policy refresh may be required.
+)
+
+echo.
+
+
+rem ============================================================
+rem HARDENING VERIFICATION
+rem ============================================================
+
+echo ============================================================
+echo                  HARDENING VERIFICATION
+echo ============================================================
+echo.
+
+echo [1] SMB client configuration
+echo ------------------------------------------------------------
+echo.
+
+powershell.exe -NoProfile -Command ^
+    "$c=Get-SmbClientConfiguration; [pscustomobject]@{EnableSecuritySignature=$c.EnableSecuritySignature;RequireSecuritySignature=$c.RequireSecuritySignature;EnableInsecureGuestLogons=$c.EnableInsecureGuestLogons} | Format-List"
+
+echo.
+echo [2] LLMNR configuration
+echo ------------------------------------------------------------
+echo.
+
+powershell.exe -NoProfile -Command ^
+    "$p='HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient'; $v=Get-ItemProperty -Path $p -Name EnableMulticast -ErrorAction SilentlyContinue; if($null -eq $v){Write-Host 'EnableMulticast : NOT CONFIGURED'}else{Write-Host ('EnableMulticast : ' + $v.EnableMulticast)}"
+
+echo.
+echo ============================================================
+echo                  HARDENING RESULT
+echo ============================================================
+echo.
+
+if "%HardeningErrors%"=="0" (
+
+    set "SecurityHardeningStatus=COMPLETED"
+
+    echo [OK] CLIENT SECURITY HARDENING COMPLETED.
+    echo.
+    echo Applied:
+    echo.
+    echo     - Insecure SMB guest logons disabled
+    echo     - SMB signing enabled
+    echo     - SMB signing required
+    echo     - LLMNR disable policy configured
+
+) else (
+
+    set "SecurityHardeningStatus=COMPLETED WITH ERRORS"
+
+    echo [WARNING] Security hardening completed with errors.
+    echo.
+    echo Errors:
+    echo     %HardeningErrors%
+
+)
+
+echo.
+echo IMPORTANT:
+echo.
+echo These changes affect this client PC only.
+echo.
+echo Server-side security still needs separate review:
+echo.
+echo     - SMB share permissions
+echo     - NTFS permissions
+echo     - Server SMB signing
+echo     - SMB encryption
+echo     - Server firewall profiles/rules
+echo     - Server WinRM firewall rules
+echo.
+
+exit /b 0
 
 
 rem ============================================================
@@ -2381,6 +2739,7 @@ echo.
 echo The security audit will continue where Windows permits
 echo read-only information.
 echo.
+
 exit /b 0
 
 
@@ -2408,19 +2767,6 @@ rem ============================================================
 if not exist "%ConfigFile%" (
     exit /b 0
 )
-
-rem ------------------------------------------------------------
-rem IMPORTANT:
-rem
-rem Do NOT use:
-rem
-rem     if defined %%B
-rem
-rem because that tests whether an environment variable named
-rem after the value exists.
-rem
-rem We only need to verify that the value is not empty.
-rem ------------------------------------------------------------
 
 for /f "usebackq tokens=1,* delims==" %%A in ("%ConfigFile%") do (
 
@@ -2483,6 +2829,9 @@ exit /b 0
 
 rem ============================================================
 rem WAIT FOR USER
+rem
+rem Used by individual menu operations.
+rem NOT used between client setup steps.
 rem ============================================================
 
 :WAIT_FOR_USER
